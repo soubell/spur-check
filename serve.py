@@ -104,6 +104,7 @@ class RequestHandler(http.server.SimpleHTTPRequestHandler):
                     response_data = {
                         "success": True,
                         "session_id": sid,
+                        "password": password,
                         "data": data,
                         "proxies": data.get("client", {}).get("proxies", []),
                         "risks": data.get("risks", []),
