@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>IPRoyal Panel</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;background:#1a1a2e;color:#eee;max-width:1000px;margin:0 auto;padding:20px}
+h1{color:#4ecca3}
+button{background:#4ecca3;color:#000;border:none;padding:10px 20px;border-radius:6px;font-size:16px;cursor:pointer;margin:10px 0}
+button:disabled{opacity:0.5;cursor:not-allowed}
+.progress{width:100%;background:#16213e;border-radius:4px;height:24px;margin:10px 0;overflow:hidden}
+.progress-bar{height:100%;background:#4ecca3;width:0%;transition:width 0.3s}
+.status{margin:10px 0;font-size:14px;color:#aaa}
+table{width:100%;border-collapse:collapse;margin-top:15px}
+th,td{border:1px solid #333;padding:8px;text-align:left;font-size:13px}
+th{background:#0f3460}
+tr:nth-child(even){background:#16213e}
+.pass{font-family:monospace;cursor:pointer;color:#4ecca3;text-decoration:underline}
+.log-info{background:#16213e;padding:10px;border-radius:4px;margin:10px 0;font-size:13px}
+</style>
+</head>
+<body>
+<h1>IPRoyal Panel</h1>
+<p>25 sessions (country-jp, 15m) → clean only (no proxy/tunnel/risk)</p>
+
+<label for="sessionCount">Sessions:</label>
+<input type="number" id="sessionCount" value="25" min="1" max="50" style="margin:0 15px 10px 5px;width:60px;">
+
+<div class="log-info" id="logInfo" style="display:none"></div>
+
+<button id="btn">▶ Generate 25 Sessions</button>
+<div class="status" id="status"></div>
+<div class="progress" id="progress" style="display:none">
+  <div class="progress-bar" id="progressBar"></div>
+</div>
+<table id="tbl" style="display:none">
+<thead>
+<tr><th>#</th><th>IP</th><th>ISP</th><th>Country</th><th>City</th><th>ms</th><th>Password (session)</th></tr>
+</thead>
+<tbody></tbody>
+</table>
+
+<script>
+function randSid(){
+  return Array.from({length:8},()=>"0123456789abcdef"[Math.random()*16|0]).join("");
+}
+
+function copyPassword(text){
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(()=>alert("Copied password"));
+  } else {
+    const ta=document.createElement("textarea");
+    ta.value=text; ta.style.position="fixed"; ta.style.opacity="0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    alert("Copied password");
+  }
+}
+
+async function runSession(){
+  const res=await fetch("/api/session?country=jp&lifetime=15m");
+  const data=await res.json();
+  const proxies=(data.proxies||data.client?.proxies||[]);
+  const risks=data.risks||[];
+  const tunnels=data.tunnels||[];
+  return {pass:data.password,data:data.data,proxies,risks,tunnels,ms:data.ms};
+}
+
+document.getElementById("btn").onclick=async()=>{
+  const btn=document.getElementById("btn");
+  const st=document.getElementById("status");
+  const tbody=document.querySelector("#tbl tbody");
+  const progress=document.getElementById("progress");
+  const progressBar=document.getElementById("progressBar");
+  const total=Math.max(1, Math.min(50, parseInt(document.getElementById("sessionCount").value)||25));
+  tbody.innerHTML="";
+  document.getElementById("tbl").style.display="table";
+  btn.disabled=true;
+  progress.style.display="block";
+  progressBar.style.width="0%";
+  st.textContent="Starting...";
+
+  const clean=[];
+  let completed=0;
+  const promises=[];
+  for(let i=1;i<=total;i++){
+    st.textContent=`Queueing ${i}/${total}`;
+    promises.push((async()=>{
+      try{
+        const r=await runSession();
+        if(!r.proxies.length && !r.risks.length && !r.tunnels.length){
+          clean.push({n:i,ip:r.data.ip,pass:r.pass,isp:r.data.organization,country:r.data.location?.country,city:r.data.location?.city,ms:r.ms});
+        }
+      }catch(e){}
+      completed++;
+      progressBar.style.width=(completed/total*100)+"%";
+    })());
+  }
+
+  await Promise.all(promises);
+
+  progressBar.style.width="100%";
+
+  // Sort by response time (fastest first)
+  clean.sort((a,b)=>a.ms-b.ms);
+
+  // Save clean results to log file
+  st.textContent="Saving results...";
+  try{
+    const saveRes=await fetch("/api/save_log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(clean)});
+    const saveData=await saveRes.json();
+    if(saveData.success){
+      st.textContent=`Done. ${clean.length} clean sessions (${total} requested). Sorted by speed.`;
+      // Auto-redirect to the log page
+      window.location.href=`?log=${saveData.filename}`;
+    } else {
+      st.textContent=`Error saving results: ${saveData.error||"unknown"}`;
+    }
+  }catch(e){
+    st.textContent=`Error saving results: ${e.message}`;
+  }
+
+  clean.forEach(r=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`<td>${r.n}</td><td>${r.ip}</td><td>${r.isp}</td><td>${r.country}</td><td>${r.city||''}</td><td>${r.ms}ms</td><td class="pass" onclick="copyPassword('${r.pass}')">${r.pass}</td>`;
+    tbody.appendChild(tr);
+  });
+
+  btn.disabled=false;
+};
+
+// Handle ?log=filename
+const params=new URLSearchParams(window.location.search);
+if(params.has("log")){
+  const logFile=params.get("log");
+  const logInfo=document.getElementById("logInfo");
+  logInfo.style.display="block";
+  logInfo.textContent=`Loading log: ${logFile}...`;
+  fetch(`/logs/${logFile}`)
+    .then(r=>r.text())
+    .then(text=>{
+      const lines=text.trim().split("\n").filter(l=>l.trim());
+      const clean=[];
+      lines.forEach((line,idx)=>{
+        try{
+          const data=JSON.parse(line);
+          const proxies=(data.client?.proxies||data.proxies||[]);
+          const risks=data.risks||[];
+          const tunnels=data.tunnels||[];
+          if(!proxies.length && !risks.length && !tunnels.length){
+            clean.push({n:idx+1,ip:data.ip,pass:data.pass||'',isp:data.isp||data.organization,country:data.country||(data.location?data.location.country:''),city:data.city||(data.location?data.location.city:'')});
+          }
+        }catch(e){}
+      });
+      logInfo.textContent=`Loaded log: ${logFile} → ${clean.length} clean entries`;
+      const tbody=document.querySelector("#tbl tbody");
+      document.getElementById("tbl").style.display="table";
+      clean.forEach(r=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML=`<td>${r.n}</td><td>${r.ip}</td><td>${r.isp}</td><td>${r.country}</td><td>${r.city||''}</td><td>${r.ms}ms</td><td class="pass" onclick="copyPassword('${r.pass}')">${r.pass}</td>`;
+        tbody.appendChild(tr);
+      });
+    })
+    .catch(e=>{
+      logInfo.textContent=`Error loading log: ${e.message}`;
+    });
+}
+</script>
+</body>
+</html>
