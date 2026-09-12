@@ -149,7 +149,7 @@ if(params.has("log")){
           const risks=data.risks||[];
           const tunnels=data.tunnels||[];
           if(!proxies.length && !risks.length && !tunnels.length){
-            clean.push({n:idx+1,ip:data.ip,pass:data.pass||'',isp:data.isp||data.organization,country:data.country||(data.location?data.location.country:''),city:data.city||(data.location?data.location.city:'')});
+            clean.push({n:idx+1,ip:data.ip,pass:data.pass||'',isp:data.isp||data.organization,country:data.country||(data.location?data.location.country:''),city:data.city||(data.location?data.location.city:''),ms:data.ms||0});
           }
         }catch(e){}
       });
