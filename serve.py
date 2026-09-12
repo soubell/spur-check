@@ -10,6 +10,17 @@ import socketserver
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
+# Load .env automatically if present
+_dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.isfile(_dotenv_path):
+    with open(_dotenv_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                if k not in os.environ:
+                    os.environ[k] = v
+
 PORT = int(os.environ.get("PORT", "8765"))
 LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
 
