@@ -15,7 +15,6 @@ This web interface displays the list of IP addresses from the IPRoyal session te
 
 ### 1. Start the web server
 ```bash
-cd web_spur
 python3 serve.py
 ```
 
